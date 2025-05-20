@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jogo Stranger Things & Ordem Paranormal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #0d0c0f;
+    color: #eee;
+    font-family: 'Press Start 2P', cursive;
+    user-select: none;
+  }
+  #gameCanvas {
+    display: block;
+    margin: 0 auto;
+    background: radial-gradient(ellipse at center, #111 0%, #040203 80%);
+    border: 3px solid #8b0000;
+    border-radius: 12px;
+    box-shadow: 0 0 20px #880000;
+  }
+  #infoPanel {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 600px;
+    background: rgba(0,0,0,0.7);
+    border: 2px solid #8b0000;
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    color: #ff6347;
+    font-size: 14px;
+    min-height: 50px;
+    user-select: none;
+    line-height: 1.2;
+  }
+  #scoreBoard {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    color: #ff6347;
+    font-size: 18px;
+    text-shadow: 0 0 6px #ff6347;
+    user-select: none;
+  }
+  #livesBoard {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    color: #ff6347;
+    font-size: 18px;
+    text-shadow: 0 0 6px #ff6347;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="700" height="500" tabindex="0"></canvas>
+<div id="scoreBoard">Monstros mortos: 0</div>
+<div id="livesBoard">Chances: 10</div>
+<div id="infoPanel">Mate os monstros para descobrir curiosidades do mundo!</div>
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+
+  // Player properties
+  const player = {
+    x: width / 2,
+    y: height / 2,
+    size: 32,
+    speed: 4,
+    vx: 0,
+    vy: 0,
+    colorHair: '#d1443e', // red hair
+    colorClothes: '#111',
+    reloadTime: 400,
+    lastShot: 0,
+  };
+
+  // Bullet class
+  class Bullet {
+    constructor(x, y, angle) {
+      this.x = x;
+      this.y = y;
+      this.radius = 5;
+      this.speed = 9;
+      this.angle = angle;
+      this.vx = Math.cos(angle) * this.speed;
+      this.vy = Math.sin(angle) * this.speed;
+      this.active = true;
+    }
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      if (
+        this.x < 0 || this.x > width ||
+        this.y < 0 || this.y > height
+      ) {
+        this.active = false;
+      }
+    }
+    draw(ctx) {
+      ctx.beginPath();
+      ctx.fillStyle = '#ff3e3e';
+      ctx.shadowColor = '#ff3e3e';
+      ctx.shadowBlur = 8;
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Monster class
+  class Monster {
+    constructor() {
+      this.size = 40 + Math.random() * 20;
+      // spawn outside screen edges randomly
+      let edge = Math.floor(Math.random()*4);
+      if (edge === 0) { // left
+        this.x = -this.size;
+        this.y = Math.random() * height;
+      } else if (edge ===1) { // right
+        this.x = width + this.size;
+        this.y = Math.random() * height;
+      } else if (edge === 2) { // top
+        this.x = Math.random() * width;
+        this.y = -this.size;
+      } else { // bottom
+        this.x = Math.random() * width;
+        this.y = height + this.size;
+      }
+      this.speed = 1 + Math.random() * 1.4;
+      this.health = 1;
+      this.active = true;
+      this.updateDirection();
+    }
+    updateDirection() {
+      const dx = player.x - this.x;
+      const dy = player.y - this.y;
+      const mag = Math.sqrt(dx*dx + dy*dy);
+      this.vx = (dx / mag) * this.speed;
+      this.vy = (dy / mag) * this.speed;
+    }
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      this.updateDirection();
+      // If touches player area -> lose a chance
+      const dist = Math.sqrt((player.x - this.x)**2 + (player.y - this.y)**2);
+      if (dist < this.size/2 + player.size/2 && this.active) {
+        this.active = false;
+        loseChance();
+      }
+    }
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(Math.sin(Date.now()*0.005) * 0.1);
+
+      // body
+      ctx.beginPath();
+      ctx.fillStyle = '#551a1a';
+      ctx.strokeStyle = '#aa2d2d';
+      ctx.lineWidth = 3;
+      ctx.ellipse(0, 0, this.size*0.4, this.size*0.7, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+
+      // eyes
+      const eyeY = -this.size * 0.2;
+      const eyeXOffset = this.size * 0.18;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(-eyeXOffset, eyeY, this.size*0.1, this.size*0.13, 0, 0, Math.PI*2);
+      ctx.ellipse(eyeXOffset, eyeY, this.size*0.1, this.size*0.13, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(-eyeXOffset, eyeY, this.size*0.05, this.size*0.07, 0, 0, Math.PI*2);
+      ctx.ellipse(eyeXOffset, eyeY, this.size*0.05, this.size*0.07, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // mouth (sharp, wicked)
+      ctx.strokeStyle = '#cc2222';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-this.size*0.15, this.size*0.2);
+      ctx.lineTo(-this.size*0.05, this.size*0.3);
+      ctx.lineTo(0, this.size*0.2);
+      ctx.lineTo(this.size*0.05, this.size*0.3);
+      ctx.lineTo(this.size*0.15, this.size*0.2);
+      ctx.stroke();
+
+      // spikes on head
+      for(let i=-2; i<=2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i*this.size*0.12, -this.size*0.7);
+        ctx.lineTo(i*this.size*0.12 + this.size*0.05, -this.size*0.85);
+        ctx.lineTo(i*this.size*0.12 + this.size*0.1, -this.size*0.7);
+        ctx.closePath();
+        ctx.fillStyle = '#aa2222';
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // Draw player
+  function drawPlayer(ctx) {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+
+    // shadow glow
+    ctx.shadowColor = '#d1443e';
+    ctx.shadowBlur = 12;
+
+    // body (black clothes)
+    ctx.beginPath();
+    ctx.fillStyle = player.colorClothes;
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.ellipse(0, 6, 14, 20, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+
+    // head
+    ctx.beginPath();
+    ctx.fillStyle = '#fce3d0';
+    ctx.strokeStyle = '#b2a595';
+    ctx.lineWidth = 1.5;
+    ctx.ellipse(0, -10, 14, 18, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+
+    // hair (red)
+    ctx.beginPath();
+    ctx.fillStyle = player.colorHair;
+    // back hair shape
+    ctx.moveTo(-14, -22);
+    ctx.bezierCurveTo(-25, -40, 15, -48, 14, -22);
+    ctx.lineTo(14, 5);
+    ctx.bezierCurveTo(0, 5, -4, -3, -8, -5);
+    ctx.closePath();
+    ctx.fill();
+
+    // eyes
+    ctx.fillStyle = '#2c1608';
+    ctx.beginPath();
+    ctx.ellipse(-5, -10, 3, 2, 0, 0, Math.PI*2);
+    ctx.ellipse(5, -10, 3, 2, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // mouth
+    ctx.strokeStyle = '#822e1c';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-5, -2);
+    ctx.quadraticCurveTo(0, 3, 5, -2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Game state
+  let keys = {};
+  let bullets = [];
+  let monsters = [];
+  let kills = 0;
+  let chances = 10;
+  let gameRunning = true;
+
+  // World facts
+  const facts = [
+    "Você sabia? O polvo tem três corações!",
+    "Na Noruega, existe um rio que desaparece e reaparece chamado rivière perdue.",
+    "As árvores comunicam-se entre si por um sistema de raízes interligadas de fungos chamados micorrizas.",
+    "A luz do Sol demora cerca de 8 minutos para chegar à Terra.",
+    "Python é uma das linguagens de programação mais populares do mundo!",
+    "As estrelas-do-mar podem regenerar seus braços perdidos.",
+    "Montanhas-russas foram originalmente criadas para o lazer na Rússia do século XVII.",
+    "Os morcegos são os únicos mamíferos que conseguem realmente voar.",
+    "Na Austrália, existem mais de mil espécies diferentes de cangurus.",
+    "O cérebro humano tem cerca de 86 bilhões de neurônios.",
+    "Nos Estados Unidos, há mais casas com piscinas do que com banheiras.",
+    "O Deserto do Saara já foi uma floresta tropical há milhões de anos atrás.",
+    "O som viaja mais rápido na água do que no ar.",
+    "A maior flor do mundo, a Rafflesia arnoldii, pode pesar até 11 kg."
+  ];
+  let lastFactIndex = -1;
+
+  // UI
+  const scoreBoard = document.getElementById('scoreBoard');
+  const livesBoard = document.getElementById('livesBoard');
+  const infoPanel = document.getElementById('infoPanel');
+
+  // Input handlers
+  window.addEventListener('keydown', e => {
+    keys[e.key.toLowerCase()] = true;
+    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+  let mouseX = width / 2;
+  let mouseY = height / 2;
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+  });
+
+  canvas.addEventListener('mousedown', e => {
+    shoot();
+  });
+  window.addEventListener('keydown', e => {
+    if(e.key === ' ') {
+      shoot();
+    }
+  });
+
+  function shoot() {
+    const now = Date.now();
+    if (now - player.lastShot < player.reloadTime || !gameRunning) return;
+
+    const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+    const bullet = new Bullet(player.x + Math.cos(angle)*20, player.y + Math.sin(angle)*20, angle);
+    bullets.push(bullet);
+    player.lastShot = now;
+  }
+
+  function spawnMonster() {
+    if (!gameRunning) return;
+    if (monsters.length < 6) {
+      monsters.push(new Monster());
+    }
+  }
+
+  function update() {
+    if (!gameRunning) return;
+
+    player.vx = 0; player.vy = 0;
+    if (keys['w'] || keys['arrowup']) player.vy = -player.speed;
+    if (keys['s'] || keys['arrowdown']) player.vy = player.speed;
+    if (keys['a'] || keys['arrowleft']) player.vx = -player.speed;
+    if (keys['d'] || keys['arrowright']) player.vx = player.speed;
+
+    if (player.vx !== 0 && player.vy !== 0) {
+      player.vx *= Math.SQRT1_2;
+      player.vy *= Math.SQRT1_2;
+    }
+
+    player.x += player.vx;
+    player.y += player.vy;
+
+    player.x = Math.min(Math.max(player.size/2, player.x), width - player.size/2);
+    player.y = Math.min(Math.max(player.size/2, player.y), height - player.size/2);
+
+    bullets.forEach(b => b.update());
+    bullets = bullets.filter(b => b.active);
+
+    monsters.forEach(m => {
+      m.update();
+
+      bullets.forEach(b => {
+        const dist = Math.sqrt((b.x - m.x)**2 + (b.y - m.y)**2);
+        if (dist < b.radius + m.size/2 && m.active) {
+          b.active = false;
+          m.health -= 1;
+          if (m.health <= 0) {
+            m.active = false;
+            kills++;
+            updateScore();
+            showRandomFact();
+          }
+        }
+      });
+    });
+    monsters = monsters.filter(m => m.active);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(13,12,15,0.9)';
+    ctx.fillRect(0, 0, width, height);
+
+    const fogR = 50 + 20 * Math.sin(Date.now()*0.002);
+    const fogG = 2;
+    const fogB = 2;
+    ctx.fillStyle = `rgba(${fogR},${fogG},${fogB},0.03)`;
+    ctx.fillRect(0, 0, width, height);
+
+    drawPlayer(ctx);
+    bullets.forEach(b => b.draw(ctx));
+    monsters.forEach(m => m.draw(ctx));
+
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#444';
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#ff3e3e';
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.rect(10, -4, 20, 8);
+    ctx.fill();
+    ctx.stroke();
+    if (Date.now() - player.lastShot < 100) {
+      ctx.beginPath();
+      ctx.fillStyle = '#ff3e3e';
+      ctx.shadowBlur = 10;
+      ctx.arc(30, 0, 8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  function loseChance() {
+    chances--;
+    updateLives();
+    if (chances <= 0) {
+      gameOver();
+    } else {
+      infoPanel.textContent = `Você perdeu uma chance! Chances restantes: ${chances}`;
+      infoPanel.style.color = "#ff4444";
+    }
+  }
+
+  function gameOver() {
+    gameRunning = false;
+    infoPanel.textContent = `Fim de jogo! Você matou ${kills} monstros. Recarregue para tentar de novo.`;
+    infoPanel.style.color = "#ff4444";
+  }
+
+  function updateScore() {
+    scoreBoard.textContent = `Monstros mortos: ${kills}`;
+  }
+
+  function updateLives() {
+    livesBoard.textContent = `Chances: ${chances}`;
+  }
+
+  function showRandomFact() {
+    let index;
+    do {
+      index = Math.floor(Math.random() * facts.length);
+    } while (index === lastFactIndex);
+    lastFactIndex = index;
+    infoPanel.textContent = facts[index];
+    infoPanel.style.color = "#ff6347";
+  }
+
+  setInterval(() => {
+    if (gameRunning) spawnMonster();
+  }, 1800);
+
+  function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  updateScore();
+  updateLives();
+  gameLoop();
+  canvas.focus();
+})();
+</script>
+</body>
+</html>
+
+
